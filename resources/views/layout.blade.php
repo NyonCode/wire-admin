@@ -76,6 +76,12 @@
                 // navigated to.
                 mobile: false,
 
+                // Whether the menu filter holds a term. Folded groups and
+                // submenus open while it does — a match inside a folded group
+                // is otherwise a match nobody can see, which reads as "nothing
+                // found". Written by the filter controller, read by the menu.
+                filtering: false,
+
                 // Whether the viewport is wide enough for a column at all. The
                 // rail is a *desktop* shape — below `lg` the same menu is a
                 // drawer — so a stored rail preference must not follow it onto a
@@ -125,6 +131,12 @@
                 openMobile() {
                     this.mobile = true;
                     document.body.classList.add('overflow-hidden', 'lg:overflow-auto');
+
+                    // Onto the first row of the menu, once the trap on the
+                    // drawer is active — it activates on a 15ms timer of its own,
+                    // and focusing earlier would be focusing outside a trap that
+                    // then pulls the caret back to the drawer's edge.
+                    setTimeout(() => document.querySelector('#wire-admin-nav a[href], #wire-admin-nav button')?.focus(), 30);
                 },
 
                 closeMobile() {
@@ -159,7 +171,10 @@
     >{{ __('wire-admin::messages.skip_to_content') }}</a>
 
     <div class="lg:flex">
-        <x-wire-admin::sidebar :linked-only="$linkedOnly" />
+        {{-- In the bar shape the column is only the phone's drawer; from `lg` up
+             the menu is the bar under the header, below. --}}
+        @php($barShape = $navigationShape() === \NyonCode\WireAdmin\Enums\NavigationShape::Top)
+        <x-wire-admin::sidebar :linked-only="$linkedOnly" :drawer-only="$barShape" />
 
         <div class="min-w-0 flex-1">
             <header class="sticky top-0 z-30 flex h-16 items-center gap-2 border-b border-gray-200 bg-white/90 px-4 backdrop-blur-sm dark:border-gray-800 dark:bg-gray-900/90" @wireEl('admin-topbar')>
@@ -180,7 +195,18 @@
                     {!! icon('outline:bars-3', 'h-5 w-5') !!}
                 </button>
 
-                {{-- Says which way it goes, rather than naming one direction for
+                {{-- The brand, where the column would have carried it: in the bar
+                     shape there is no column from `lg` up to put it in. --}}
+                @if ($barShape)
+                    <div class="hidden shrink-0 items-center pe-2 lg:flex" data-testid="admin-topbar-brand" @wireEl('admin-topbar-brand')>
+                        <x-wire-admin::brand />
+                    </div>
+                @endif
+
+                {{-- Not drawn in the bar shape: there is no column to collapse, and
+                     a shortcut that toggles nothing is a key that seems broken.
+
+                     Says which way it goes, rather than naming one direction for
                      both states: a handle labelled "collapse the menu" while the
                      menu is already collapsed is the control people press twice
                      to find out what it does.
@@ -191,6 +217,7 @@
                      focus the control to use is not a shortcut — and declined
                      while the caret is in a field, because in a rich-text editor
                      the same chord is bold. --}}
+                @unless ($barShape)
                 <button
                     type="button"
                     x-data
@@ -216,6 +243,7 @@
                     <span x-show="! $store.wireAdmin.rail">{!! icon('outline:bars-3', 'h-5 w-5') !!}</span>
                     <span x-show="$store.wireAdmin.rail" x-cloak>{!! icon('outline:chevron-double-right', 'h-5 w-5 rtl:rotate-180') !!}</span>
                 </button>
+                @endunless
 
                 {{-- The brand moved into the sidebar header, where a logo belongs
                      and where the rail can shrink it to a square. What stays here
@@ -314,7 +342,7 @@
                                 <span class="hidden max-w-32 truncate text-sm text-gray-700 sm:block dark:text-gray-200">
                                     {{ auth()->user()->name ?? auth()->user()->email ?? '' }}
                                 </span>
-                                {!! icon('outline:chevron-down', 'h-4 w-4 text-gray-400') !!}
+                                {!! icon('outline:chevron-down', 'h-4 w-4 text-gray-500 dark:text-gray-400') !!}
                             </button>
                         </x-slot:trigger>
 
@@ -346,7 +374,11 @@
                 @wireRenderHook('admin.topbar.end')
             </header>
 
-            <main id="wire-admin-main" class="p-4" data-testid="admin-content" @wireEl('admin-content')>
+            @if ($barShape)
+                <x-wire-admin::top-nav :linked-only="$linkedOnly" />
+            @endif
+
+            <main id="wire-admin-main" tabindex="-1" class="p-4 focus:outline-none" data-testid="admin-content" @wireEl('admin-content')>
                 {{ $slot }}
             </main>
         </div>

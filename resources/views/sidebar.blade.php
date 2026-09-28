@@ -33,8 +33,20 @@
 
 <aside
     data-testid="admin-sidebar" @wireEl('admin-sidebar')
-    x-data
+    {{-- Arrow keys, Home/End and type-ahead over the rows (wireNavKeys, the
+         package's bundle). On the aside rather than the nav, so the rows, the
+         pinned copies and the filter above them are one sequence. --}}
+    x-data="wireNavKeys"
+    x-on:keydown="move($event)"
     x-on:keydown.escape.window="$store.wireAdmin.closeMobile()"
+    {{-- An open drawer keeps the keyboard inside it: without this, Tab walked
+         on through the page *behind* the dimming layer, to controls nobody
+         could see. Alpine's focus trap (bundled with Livewire) also hands focus
+         back to whatever opened the drawer when it closes, however it closes —
+         Escape, the dimming layer, the close button or a link. `noautofocus`
+         because the first focusable element here is the brand link; the store
+         puts the caret on the first menu row instead. --}}
+    x-trap.noautofocus="$store.wireAdmin?.mobile"
     x-bind:class="$store.wireAdmin?.mobile ? 'translate-x-0 shadow-2xl' : '-translate-x-full'"
     {{-- The width is not bound. It was, and binding it is what made a collapsed
          menu open to 288 pixels on every page load and slide shut again: Alpine
@@ -44,7 +56,7 @@
          body is parsed — which is also why `lg:w-64` can finally sit here as an
          ordinary class. The rail's rule is an attribute selector and outranks
          it, so the two no longer compete on sheet order. --}}
-    class="wire-admin-sidebar fixed inset-y-0 start-0 z-50 flex w-72 flex-col border-e border-gray-200 bg-white transition-transform duration-200 motion-reduce:transition-none lg:sticky lg:top-0 lg:z-auto lg:h-dvh lg:w-64 lg:shrink-0 lg:translate-x-0 lg:shadow-none lg:transition-[width] dark:border-gray-800 dark:bg-gray-900"
+    class="wire-admin-sidebar fixed inset-y-0 start-0 z-50 flex w-72 flex-col border-e border-gray-200 bg-white transition-transform duration-200 motion-reduce:transition-none lg:sticky lg:top-0 lg:z-auto lg:h-dvh lg:w-64 lg:shrink-0 lg:translate-x-0 lg:shadow-none lg:transition-[width] dark:border-gray-800 dark:bg-gray-900 {{ $drawerOnly ? 'lg:hidden' : '' }}"
 >
     {{-- A `<header>`, not a `<div>`, and that is the whole of how the logo row
          stays level with the top bar beside it. Both are the shell's top band;
@@ -65,7 +77,7 @@
             type="button"
             x-on:click="$store.wireAdmin.closeMobile()"
             data-testid="admin-sidebar-close" @wireEl('admin-sidebar-close')
-            class="me-3 shrink-0 rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 lg:hidden dark:hover:bg-gray-800 dark:hover:text-gray-300"
+            class="me-3 shrink-0 rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-600 lg:hidden dark:hover:bg-gray-800 dark:hover:text-gray-300"
         >
             <span class="sr-only">{{ __('wire-admin::messages.close_menu') }}</span>
             {!! icon('outline:x-mark', 'h-5 w-5') !!}
@@ -76,7 +88,51 @@
         id="wire-admin-nav"
         aria-label="{{ __('wire-admin::messages.navigation') }}"
         class="flex-1 overflow-x-hidden overflow-y-auto p-3"
+        @if ($filter)
+            x-data="wireNavFilter"
+            x-on:keydown.window="focusFromShortcut($event)"
+        @endif
     >
+        @if ($filter)
+            {{-- The filter. Hidden in the rail: 64 pixels have no room for a
+                 field, and ⌘K is the answer there. It narrows what is drawn and
+                 keeps it looking like itself; it is not a second search. --}}
+            <div data-rail-hide class="mb-4">
+                <label class="sr-only" for="wire-admin-nav-filter">{{ __('wire-admin::messages.filter') }}</label>
+                <div class="relative">
+                    <span class="pointer-events-none absolute inset-y-0 start-0 flex items-center ps-2.5 text-gray-400">{!! icon('outline:funnel', 'h-4 w-4') !!}</span>
+                    <input
+                        id="wire-admin-nav-filter"
+                        type="search"
+                        x-ref="filter"
+                        x-model="query"
+                        x-on:keydown.escape.stop.prevent="clear()"
+                        x-on:keydown.down="enter($event)"
+                        placeholder="{{ __('wire-admin::messages.filter') }}"
+                        autocomplete="off"
+                        data-testid="admin-nav-filter" @wireEl('admin-nav-filter')
+                        class="w-full rounded-lg border border-gray-200 bg-gray-50 py-1.5 ps-8 pe-7 text-sm text-gray-900 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:border-primary-500 focus:bg-white focus:ring-1 focus:ring-primary-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:focus:bg-gray-900"
+                    >
+                    <kbd x-show="query === ''" class="pointer-events-none absolute inset-y-0 end-2 my-auto h-5 rounded-sm border border-gray-200 px-1.5 text-[11px] leading-5 text-gray-500 dark:text-gray-400 dark:border-gray-700">/</kbd>
+                </div>
+
+                {{-- Read by a screen reader as the list changes, in the
+                     translation's own plural for each count. --}}
+                <p class="sr-only" aria-live="polite" x-text="matches === null ? '' : (@js($filterMessages)[matches] ?? '')"></p>
+
+                <p
+                    x-show="matches === 0"
+                    x-cloak
+                    data-testid="admin-nav-filter-empty" @wireEl('admin-nav-filter-empty')
+                    class="px-3 pt-3 text-sm text-gray-500 dark:text-gray-400"
+                >{{ __('wire-admin::messages.filter_none') }}</p>
+            </div>
+        @endif
+
+        @if ($pins)
+            @livewire('wire-admin.nav-pins', ['zone' => $zone, 'current' => $activeKey, 'linkedOnly' => $linkedOnly], key('wire-admin-nav-pins'))
+        @endif
+
         @forelse ($groups as $group)
             {{-- A collapsible group carries its own open state, keyed by the group
                  slug so two menus in one application never share one. Restored
@@ -86,6 +142,7 @@
             <div
                 class="mb-5 last:mb-0"
                 data-testid="admin-nav-group" @wireEl('admin-nav-group')
+                data-nav-group
                 data-group="{{ $group->getKey() }}"
                 @if ($group->isCollapsible())
                     x-data="{
@@ -125,11 +182,12 @@
                         <button
                             type="button"
                             x-on:click="open = ! open"
+                            data-nav-focus
                             x-bind:aria-expanded="open ? 'true' : 'false'"
                             aria-controls="wire-admin-group-{{ $group->getKey() }}"
                             data-testid="admin-nav-heading" @wireEl('admin-nav-heading')
                             data-collapsible="true"
-                            class="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] font-semibold tracking-wider text-gray-400 uppercase transition hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                            class="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] font-semibold tracking-wider text-gray-500 uppercase transition hover:text-gray-600 dark:hover:text-gray-300"
                         >
                             @if ($group->getIcon())
                                 {!! icon($group->getIcon(), 'h-3.5 w-3.5') !!}
@@ -140,7 +198,7 @@
                     @else
                         <p
                             data-testid="admin-nav-heading" @wireEl('admin-nav-heading')
-                            class="flex items-center gap-2 px-3 py-1.5 text-[11px] font-semibold tracking-wider text-gray-400 uppercase dark:text-gray-500"
+                            class="flex items-center gap-2 px-3 py-1.5 text-[11px] font-semibold tracking-wider text-gray-500 dark:text-gray-400 uppercase"
                         >
                             @if ($group->getIcon())
                                 {!! icon($group->getIcon(), 'h-3.5 w-3.5') !!}
@@ -159,7 +217,7 @@
                 <ul
                     id="wire-admin-group-{{ $group->getKey() }}"
                     class="mt-1 space-y-0.5"
-                    @if ($group->isCollapsible()) x-show="open || $store.wireAdmin?.railed" x-collapse x-cloak @endif
+                    @if ($group->isCollapsible()) x-show="open || $store.wireAdmin?.filtering || $store.wireAdmin?.railed" x-collapse x-cloak @endif
                 >
                     @foreach ($group->getItems() as $key => $item)
                         @include('wire-admin::partials.nav-item', [
@@ -173,7 +231,7 @@
         @empty
             {{-- Nothing registered. An empty column reads as a broken menu, so it
                  says which of the two it is. --}}
-            <p data-testid="admin-nav-empty" @wireEl('admin-nav-empty') class="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">
+            <p data-testid="admin-nav-empty" @wireEl('admin-nav-empty') class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
                 {{ __('wire-admin::messages.empty') }}
             </p>
         @endforelse

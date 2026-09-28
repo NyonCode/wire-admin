@@ -8,6 +8,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\View\Component;
 use NyonCode\WireCore\Core\Resources\Navigation\ActiveNavigation;
 use NyonCode\WireCore\Core\Resources\Navigation\NavigationGroup;
+use NyonCode\WireCore\Core\Resources\Navigation\NavigationMemory;
 use NyonCode\WireCore\Core\Resources\Workspace;
 use NyonCode\WireCore\Foundation\Routing\Zone;
 
@@ -38,9 +39,12 @@ class Sidebar extends Component
      * @param  bool  $linkedOnly  Drop entries this zone cannot reach, instead of
      *                            drawing them unlinked. An application that routes only part of
      *                            its catalogue wants one or the other, and which one is taste.
+     * @param  bool  $drawerOnly  Only the phone drawer: from `lg` up the menu is drawn
+     *                            elsewhere — the bar a `top` layout puts under the header.
      */
     public function __construct(
         public bool $linkedOnly = false,
+        public bool $drawerOnly = false,
         ?string $zone = null,
         ?string $activeKey = null,
     ) {
@@ -82,11 +86,77 @@ class Sidebar extends Component
         return ActiveNavigation::current()->withKey($this->activeKey);
     }
 
+    /**
+     * Whether the menu draws its filter field.
+     *
+     * `auto` counts what the menu would draw — every entry and every child —
+     * against `wire-admin.navigation.filter_threshold`, because a filter over
+     * a handful of rows is a field in the way of them.
+     *
+     * @param  array<string, NavigationGroup>  $groups
+     */
+    protected function showsFilter(array $groups): bool
+    {
+        $mode = config('wire-admin.navigation.filter', 'auto');
+
+        if ($mode === 'always' || $mode === 'never') {
+            return $mode === 'always';
+        }
+
+        return $this->rowCount($groups) >= (int) config('wire-admin.navigation.filter_threshold', 12);
+    }
+
+    /**
+     * What the filter announces for each possible number of matches.
+     *
+     * Resolved here, per count, because a plural rule is the translation's and
+     * not the browser's: Czech has three forms where English has two, and a
+     * controller that pasted a number into one string would be wrong in one of
+     * them. The menu is small, so the whole table is.
+     *
+     * @param  array<string, NavigationGroup>  $groups
+     * @return array<int, string>
+     */
+    protected function filterMessages(array $groups): array
+    {
+        $messages = [];
+
+        foreach (range(0, $this->rowCount($groups)) as $count) {
+            $messages[$count] = trans_choice('wire-admin::messages.filter_matches', $count, ['count' => $count]);
+        }
+
+        return $messages;
+    }
+
+    /** @param  array<string, NavigationGroup>  $groups */
+    private function rowCount(array $groups): int
+    {
+        $rows = 0;
+
+        foreach ($groups as $group) {
+            foreach ($group->getItems() as $item) {
+                $rows += 1 + count($item->getChildren());
+            }
+        }
+
+        return $rows;
+    }
+
     public function render(): View
     {
+        $groups = $this->groups();
+        $memory = app(NavigationMemory::class);
+        $pins = $memory->stores();
+
         return view('wire-admin::sidebar', [
-            'groups' => $this->groups(),
+            // Asked once for the whole menu: a pin in an application that keeps
+            // nothing would be a button that silently does nothing.
+            'pins' => $pins,
+            'pinnedKeys' => $pins ? $memory->pinned($this->zone) : [],
+            'groups' => $groups,
             'active' => $this->active(),
+            'filter' => $filter = $this->showsFilter($groups),
+            'filterMessages' => $filter ? $this->filterMessages($groups) : [],
         ]);
     }
 }
